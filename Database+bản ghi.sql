@@ -204,3 +204,4 @@ INSERT INTO THOIKHOABIEU VALUES
     'TN261',                          -- Mã giáo viên dạy
     '2024-02-05',                     -- Ngày học: 05/02/2024
     '07:30:00');                      -- Giờ học: 7:30
+select * from THOIKHOABIEU

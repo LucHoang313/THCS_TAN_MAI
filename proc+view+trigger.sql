@@ -220,6 +220,86 @@ EXEC spXuLyNghiHoc
     @LyDo = N'Bị bệnh cảm cúm';
 select * from NGHIHOC
 
+--6. Thủ tục thêm mới học sinh
+CREATE PROCEDURE spThemHocSinh
+    @MaHS varchar(10),
+    @HoTen nvarchar(100),
+    @NgaySinh date,
+    @GioiTinh nvarchar(10),
+    @DiaChi nvarchar(200),
+    @TenLop varchar(10)
+AS
+BEGIN
+    -- Kiểm tra tuổi học sinh (11-15 tuổi)
+    IF DATEDIFF(YEAR, @NgaySinh, GETDATE()) < 11 OR DATEDIFF(YEAR, @NgaySinh, GETDATE()) > 15
+    BEGIN
+        RAISERROR (N'Tuổi học sinh không hợp lệ! (11-15 tuổi)', 16, 1)
+        RETURN
+    END
+
+    -- Kiểm tra giới tính
+    IF @GioiTinh NOT IN (N'Nam', N'Nữ')
+    BEGIN
+        RAISERROR (N'Giới tính không hợp lệ! (Nam hoặc Nữ)', 16, 1)
+        RETURN
+    END
+
+    -- Thêm học sinh mới
+    INSERT INTO HOCSINH (sMaHS, sHoTen, dNgaySinh, sGioiTinh, sDiaChi, sTenLop)
+    VALUES (@MaHS, @HoTen, @NgaySinh, @GioiTinh, @DiaChi, @TenLop)
+END
+GO
+
+EXEC spThemHocSinh 
+    @MaHS = 'K502024002', 
+    @HoTen = N'Trần Văn Bình', 
+    @NgaySinh = '2012-09-10', 
+    @GioiTinh = N'Nam', 
+    @DiaChi = N'123 Nguyễn Khoái, Hai Bà Trưng, Hà Nội', 
+    @TenLop = 'K506A'
+
+--7. Thủ tục thêm mới giáo viên
+CREATE PROCEDURE spThemGiaoVien
+    @MaGV varchar(10),
+    @HoTen nvarchar(100),
+    @NgaySinh date,
+    @GioiTinh nvarchar(10),
+    @DiaChi nvarchar(200),
+    @SDT varchar(15),
+    @ChuyenMon nvarchar(100)
+AS
+BEGIN
+    -- Kiểm tra tuổi giáo viên (22-60 tuổi)
+    IF DATEDIFF(YEAR, @NgaySinh, GETDATE()) < 22 OR DATEDIFF(YEAR, @NgaySinh, GETDATE()) > 60
+    BEGIN
+        RAISERROR (N'Độ tuổi giáo viên không hợp lệ! (22-60 tuổi)', 16, 1)
+        RETURN
+    END
+
+    -- Kiểm tra giới tính
+    IF @GioiTinh NOT IN (N'Nam', N'Nữ')
+    BEGIN
+        RAISERROR (N'Giới tính giáo viên không hợp lệ! (Nam hoặc Nữ)', 16, 1)
+        RETURN
+    END
+
+    -- Thêm giáo viên mới
+    INSERT INTO GIAOVIEN (sMaGV, sHoTen, dNgaySinh, sGioiTinh, sDiaChi, sSDT, sChuyenMon)
+    VALUES (@MaGV, @HoTen, @NgaySinh, @GioiTinh, @DiaChi, @SDT, @ChuyenMon)
+END
+GO
+select * from dbo.MONHOC
+
+EXEC spThemGiaoVien 
+    @MaGV = 'NN001',  -- Mã giáo viên môn toán
+    @HoTen = N'Nguyễn Thị Quỳnh Mai',  -- Họ tên giáo viên
+    @NgaySinh = '1992-09-10',  -- Ngày sinh phù hợp (đảm bảo trong khoảng 22-60 tuổi)
+    @GioiTinh = N'Nữ',  -- Giới tính (Nam hoặc Nữ)
+    @DiaChi = N'Số 45, Đường Xuân Thủy, Quận Cầu Giấy, Hà Nội',  -- Địa chỉ tại Hà Nội
+    @SDT = '098492775',  -- Số điện thoại hợp lệ
+    @ChuyenMon = N'Tiếng anh';  -- Chuyên môn
+
+
 -- =============================================
 -- VIEWS
 -- =============================================
@@ -312,3 +392,92 @@ GROUP BY mh.sTenMH
 GO
 
 select * from vwThongKeGiaoVien
+
+-- =============================================
+-- TRIGGERS
+-- =============================================
+--trigger cập nhật sĩ số lớp
+CREATE TRIGGER trgCapNhatSiSoLop
+ON HOCSINH
+AFTER INSERT, DELETE
+AS
+BEGIN
+    -- Tạo bảng SISO nếu chưa có
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SISO')
+    BEGIN
+        CREATE TABLE SISO (
+            sTenLop varchar(10), SiSo int)
+    END
+
+    -- Cập nhật sĩ số lớp
+    MERGE INTO SISO s
+    USING (
+        SELECT sTenLop, COUNT(*) AS SiSo
+        FROM HOCSINH
+        GROUP BY sTenLop
+    ) AS hs
+    ON s.sTenLop = hs.sTenLop
+    WHEN MATCHED THEN
+        UPDATE SET s.SiSo = hs.SiSo
+    WHEN NOT MATCHED THEN
+        INSERT (sTenLop, SiSo) VALUES (hs.sTenLop, hs.SiSo);
+END
+GO
+
+-- Trigger kiểm tra sĩ số lớp khi phân công giảng dạy
+CREATE TRIGGER trgKiemTraSiSoLop
+ON THOIKHOABIEU
+INSTEAD OF INSERT
+AS
+BEGIN
+    DECLARE @MaLop VARCHAR(10), @SiSo INT
+    
+    -- Lấy mã lớp từ bản ghi được thêm mới
+    SELECT @MaLop = sMaLop FROM inserted
+    
+    -- Kiểm tra sĩ số lớp
+    SELECT @SiSo = SiSo FROM SISO WHERE sTenLop = @MaLop
+    
+    -- Nếu sĩ số vượt quá 45 thì không cho thêm
+    IF @SiSo > 45
+    BEGIN
+        RAISERROR (N'Sĩ số lớp vượt quá 45 học sinh!', 16, 1)
+        RETURN
+    END
+    
+    -- Nếu kiểm tra thành công thì thêm bản ghi
+    INSERT INTO THOIKHOABIEU
+    SELECT * FROM inserted
+END
+GO
+
+--Trigger kiểm tra độ tuổi, giới tính khi thêm giáo viên
+CREATE TRIGGER trgKiemTraGiaoVien
+ON GIAOVIEN
+INSTEAD OF INSERT
+AS
+BEGIN
+    DECLARE @NgaySinh DATE, @GioiTinh NVARCHAR(10)
+    
+    -- Lấy ngày sinh và giới tính từ bản ghi được thêm mới
+    SELECT @NgaySinh = dNgaySinh, @GioiTinh = sGioiTinh FROM inserted
+    
+    -- Kiểm tra tuổi (22-60 tuổi)
+    IF DATEDIFF(YEAR, @NgaySinh, GETDATE()) < 22 OR DATEDIFF(YEAR, @NgaySinh, GETDATE()) > 60
+    BEGIN
+        RAISERROR (N'Độ tuổi giáo viên không hợp lệ! (22-60 tuổi)', 16, 1)
+        RETURN
+    END
+    
+    -- Kiểm tra giới tính (Nam/Nữ)
+    IF @GioiTinh NOT IN (N'Nam', N'Nữ')
+    BEGIN
+        RAISERROR (N'Giới tính giáo viên không hợp lệ! (Nam hoặc Nữ)', 16, 1)
+        RETURN
+    END
+    
+    -- Nếu kiểm tra thành công thì thêm bản ghi
+    INSERT INTO GIAOVIEN
+    SELECT * FROM inserted
+END
+GO
